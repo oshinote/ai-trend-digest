@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from pathlib import Path
 
 import anthropic
@@ -39,6 +40,29 @@ def build_user_prompt(items):
     return "\n---\n".join(blocks)
 
 
+def parse_json_array(text):
+    """Best-effort JSON extraction. Models sometimes ignore the "no code
+    fences" instruction, or add a stray sentence before/after the array.
+    Try a straight parse first, then fall back to stripping fences / pulling
+    out the outermost [...] before giving up."""
+    candidates = [text.strip()]
+
+    fence_match = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text.strip(), re.DOTALL)
+    if fence_match:
+        candidates.append(fence_match.group(1).strip())
+
+    bracket_match = re.search(r"\[.*\]", text, re.DOTALL)
+    if bracket_match:
+        candidates.append(bracket_match.group(0))
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
 def main():
     raw_items = json.loads(Path("raw_data.json").read_text())
     if not raw_items:
@@ -46,7 +70,13 @@ def main():
         print("No new items to summarize.")
         return
 
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        raise SystemExit(
+            "ANTHROPIC_API_KEY is not set (or is empty). "
+            "Add it under Settings > Secrets and variables > Actions in this repo."
+        )
+    client = anthropic.Anthropic(api_key=api_key)
 
     digest = []
     batch_size = 15  # keep prompts small and requests cheap
@@ -59,11 +89,10 @@ def main():
             messages=[{"role": "user", "content": build_user_prompt(batch)}],
         )
         text = "".join(block.text for block in response.content if block.type == "text")
-        try:
-            translations = json.loads(text)
-        except json.JSONDecodeError:
-            print("Failed to parse model output as JSON, skipping this batch:")
-            print(text[:500])
+        translations = parse_json_array(text)
+        if translations is None:
+            print("Failed to parse model output as JSON, skipping this batch. Raw output was:")
+            print(text[:1000])
             continue
 
         for t in translations:
@@ -79,6 +108,12 @@ def main():
 
     Path("digest.json").write_text(json.dumps(digest, ensure_ascii=False, indent=2))
     print(f"Summarized {len(digest)} item(s).")
+    if raw_items and not digest:
+        raise SystemExit(
+            f"summarize.py collected {len(raw_items)} item(s) but produced 0 digest "
+            "entries -- the model's output likely wasn't valid JSON. Check the "
+            "'Failed to parse model output as JSON' log lines above for the raw output."
+        )
 
 
 if __name__ == "__main__":
