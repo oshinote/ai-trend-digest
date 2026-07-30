@@ -11,12 +11,20 @@ from pathlib import Path
 
 import requests
 
-NOTION_API_KEY = os.environ["NOTION_API_KEY"]
+NOTION_API_KEY = os.environ.get("NOTION_API_KEY", "").strip()
+if not NOTION_API_KEY:
+    raise SystemExit(
+        "NOTION_API_KEY is not set (or is empty). "
+        "Add it under Settings > Secrets and variables > Actions in this repo."
+    )
 # Default points at the "AIトレンド Inbox" data source created for this project.
 # Override with the NOTION_DATA_SOURCE_ID secret if you recreate the database.
-DATA_SOURCE_ID = os.environ.get(
-    "NOTION_DATA_SOURCE_ID", "5fff784e-7834-46c7-a322-4e68a1eb08a8"
-)
+# Default points at the "AIトレンド Inbox" data source created for this project.
+# Override with the NOTION_DATA_SOURCE_ID secret if you recreate the database.
+# Note: an empty (but present) env var must still fall through to the default,
+# so this can't rely on os.environ.get(key, default) alone -- that only
+# applies the default when the key is absent, not when it's set to "".
+DATA_SOURCE_ID = os.environ.get("NOTION_DATA_SOURCE_ID", "").strip() or "5fff784e-7834-46c7-a322-4e68a1eb08a8"
 NOTION_VERSION = "2025-09-03"
 
 HEADERS = {
@@ -56,6 +64,7 @@ def create_page(entry):
 
 
 def main():
+    print(f"Targeting Notion data source: {DATA_SOURCE_ID}")
     digest = json.loads(Path("digest.json").read_text())
     ok, failed = 0, 0
     for entry in digest:
@@ -65,6 +74,11 @@ def main():
             failed += 1
         time.sleep(0.35)  # stay comfortably under Notion's rate limit
     print(f"Done. {ok} created, {failed} failed.")
+    if failed:
+        raise SystemExit(
+            f"{failed} of {len(digest)} Notion page(s) failed to create. "
+            "See the 'Failed to create page for ...' lines above for details."
+        )
 
 
 if __name__ == "__main__":
