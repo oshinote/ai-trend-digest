@@ -101,7 +101,7 @@ def main():
                 "category": SOURCE_TO_CATEGORY.get(item["source"], "コミュニティ"),
                 "source": item["source"],
                 "source_url": item["url"],
-                "published_date": (item.get("published") or "")[:10] or None,
+                "published_date": item.get("published_date"),
                 "title_ja": t["title_ja"],
                 "summary_ja": t["summary_ja"],
             })

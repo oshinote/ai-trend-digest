@@ -56,8 +56,18 @@ def matches_keywords(text):
     return any(k in text for k in KEYWORDS)
 
 
-def strip_html(text):
-    return re.sub("<[^<]+?>", "", text or "")
+def struct_to_date_string(struct_time):
+    """Convert feedparser's parsed *_parsed struct into a plain YYYY-MM-DD
+    string. Different feeds format raw date strings differently (ISO 8601
+    for Atom, RFC 822 for RSS 2.0), so date extraction elsewhere in this
+    pipeline should always go through this helper rather than slicing a raw
+    string and assuming a particular format."""
+    if not struct_time:
+        return None
+    try:
+        return datetime(*struct_time[:6], tzinfo=timezone.utc).date().isoformat()
+    except (TypeError, ValueError):
+        return None
 
 
 def collect_claude_code_changelog():
@@ -70,7 +80,7 @@ def collect_claude_code_changelog():
             "source": "Claude Code Changelog",
             "title": e.title,
             "url": e.link,
-            "published": e.get("published", e.get("updated", "")),
+            "published_date": struct_to_date_string(e.get("published_parsed") or e.get("updated_parsed")),
             "snippet": strip_html(e.get("summary", ""))[:600],
         })
     return items
@@ -87,7 +97,7 @@ def collect_arxiv():
             "source": "arXiv",
             "title": e.title,
             "url": e.link,
-            "published": e.get("published", ""),
+            "published_date": struct_to_date_string(e.get("published_parsed")),
             "snippet": strip_html(e.get("summary", ""))[:600],
         })
     return items
@@ -111,11 +121,16 @@ def collect_hacker_news():
         resp.raise_for_status()
         for hit in resp.json().get("hits", []):
             url = hit.get("url") or f"https://news.ycombinator.com/item?id={hit['objectID']}"
+            created_at = hit.get("created_at", "")
+            try:
+                published_date = datetime.fromisoformat(created_at.replace("Z", "+00:00")).date().isoformat()
+            except ValueError:
+                published_date = None
             items.append({
                 "source": "Hacker News",
                 "title": hit.get("title") or hit.get("story_title") or "",
                 "url": url,
-                "published": hit.get("created_at", ""),
+                "published_date": published_date,
                 "snippet": "",
             })
     return items
@@ -142,7 +157,7 @@ def collect_reddit():
                 "source": "Reddit",
                 "title": post.get("title", ""),
                 "url": f"https://www.reddit.com{post.get('permalink', '')}",
-                "published": created.isoformat(),
+                "published_date": created.date().isoformat(),
                 "snippet": (post.get("selftext") or "")[:600],
             })
     return items
@@ -169,7 +184,7 @@ def collect_anthropic_news():
                 "source": "Anthropic News",
                 "title": title,
                 "url": f"https://www.anthropic.com{href}",
-                "published": "",
+                "published_date": None,
                 "snippet": "",
             })
     except Exception as exc:  # noqa: BLE001 - keep the pipeline alive

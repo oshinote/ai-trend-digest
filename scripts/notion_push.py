@@ -6,6 +6,7 @@ reviews and re-statuses it later; this script never marks anything as read.
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -19,13 +20,12 @@ if not NOTION_API_KEY:
     )
 # Default points at the "AIトレンド Inbox" data source created for this project.
 # Override with the NOTION_DATA_SOURCE_ID secret if you recreate the database.
-# Default points at the "AIトレンド Inbox" data source created for this project.
-# Override with the NOTION_DATA_SOURCE_ID secret if you recreate the database.
 # Note: an empty (but present) env var must still fall through to the default,
 # so this can't rely on os.environ.get(key, default) alone -- that only
 # applies the default when the key is absent, not when it's set to "".
 DATA_SOURCE_ID = os.environ.get("NOTION_DATA_SOURCE_ID", "").strip() or "5fff784e-7834-46c7-a322-4e68a1eb08a8"
 NOTION_VERSION = "2025-09-03"
+ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 HEADERS = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -43,10 +43,12 @@ def build_properties(entry):
         "ソースURL": {"url": entry["source_url"]},
         "ステータス": {"select": {"name": "未読"}},
     }
-    if entry.get("published_date"):
-        props["公開日"] = {"date": {"start": entry["published_date"]}}
+    published_date = entry.get("published_date")
+    if published_date and ISO_DATE_RE.match(published_date):
+        props["公開日"] = {"date": {"start": published_date}}
+    elif published_date:
+        print(f"Skipping malformed published_date '{published_date}' for {entry['source_url']}")
     return props
-
 
 
 def create_page(entry):
